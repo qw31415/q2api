@@ -394,14 +394,66 @@ app.post("/v1/chat/completions", async (c) => {
                         });
 
                         for await (const [eventType, payload] of result.eventStream) {
+                            if (CONSOLE_ENABLED) {
+                                // console.log("Event Type:", eventType);
+                                // console.log("Payload keys:", typeof payload === 'object' ? Object.keys(payload) : "primitive");
+                            }
+
                             // We need to extract text from Amazon Q events
-                            // Similar to Python's _extract_text_from_event
+                            // Enhanced logic matching Python's _extract_text_from_event fully
                             let text = "";
-                            if (payload.assistantResponseEvent?.content) text = payload.assistantResponseEvent.content;
-                            else if (payload.assistantMessage?.content) text = payload.assistantMessage.content;
-                            else if (payload.message?.content) text = payload.message.content;
-                            else if (payload.delta?.content) text = payload.delta.content;
-                            // Also check for 'chunk' or other fields if needed, but usually it's one of these for text
+                            
+                            if (payload && typeof payload === 'object') {
+                                // 1. Check nested content in specific keys
+                                const keysToCheck = ["assistantResponseEvent", "assistantMessage", "message", "delta", "data"];
+                                for (const key of keysToCheck) {
+                                    if (payload[key] && typeof payload[key] === 'object') {
+                                        const inner = payload[key];
+                                        if (inner.content && typeof inner.content === 'string') {
+                                            text = inner.content;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // 2. Check top-level content (string)
+                                if (!text && payload.content && typeof payload.content === 'string') {
+                                    text = payload.content;
+                                }
+
+                                // 3. Check lists (chunks or content)
+                                if (!text) {
+                                    const listKeys = ["chunks", "content"];
+                                    for (const listKey of listKeys) {
+                                        if (Array.isArray(payload[listKey])) {
+                                            const parts = payload[listKey].map((item: any) => {
+                                                if (typeof item === 'string') return item;
+                                                if (typeof item === 'object') {
+                                                    if (item.content && typeof item.content === 'string') return item.content;
+                                                    if (item.text && typeof item.text === 'string') return item.text;
+                                                }
+                                                return "";
+                                            });
+                                            const joined = parts.join("");
+                                            if (joined) {
+                                                text = joined;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 4. Fallback: check text/delta/payload keys if they are strings
+                                if (!text) {
+                                    const fallbackKeys = ["text", "delta", "payload"];
+                                    for (const k of fallbackKeys) {
+                                        if (payload[k] && typeof payload[k] === 'string') {
+                                            text = payload[k];
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                             
                             if (text) {
                                 sendSSE({
@@ -410,12 +462,6 @@ app.post("/v1/chat/completions", async (c) => {
                                 });
                             }
                         }
-
-                        // Finish chunk
-                        sendSSE({
-                            id, object: "chat.completion.chunk", created, model,
-                            choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
-                        });
                         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 
                         await db.updateAccountStats(account.id, true, MAX_ERROR_COUNT);
@@ -443,24 +489,62 @@ app.post("/v1/chat/completions", async (c) => {
             const chunks: string[] = [];
             for await (const [_, payload] of result.eventStream) {
                 let text = "";
-                if (payload.assistantResponseEvent?.content) text = payload.assistantResponseEvent.content;
-                else if (payload.assistantMessage?.content) text = payload.assistantMessage.content;
-                else if (payload.message?.content) text = payload.message.content;
-                else if (payload.delta?.content) text = payload.delta.content;
                 
-                // Handle array content (e.g. tool_use + text)
-                if (!text && (payload.assistantResponseEvent?.content || payload.assistantMessage?.content)) {
-                    // Sometimes content is array in Amazon Q events?
-                    // Usually it's a string in the event structure seen so far.
-                    // But let's double check payload structure if needed.
+                if (payload && typeof payload === 'object') {
+                    // 1. Check nested content
+                    const keysToCheck = ["assistantResponseEvent", "assistantMessage", "message", "delta", "data"];
+                    for (const key of keysToCheck) {
+                        if (payload[key] && typeof payload[key] === 'object') {
+                            const inner = payload[key];
+                            if (inner.content && typeof inner.content === 'string') {
+                                text = inner.content;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 2. Check top-level content
+                    if (!text && payload.content && typeof payload.content === 'string') {
+                        text = payload.content;
+                    }
+
+                    // 3. Check lists
+                    if (!text) {
+                        const listKeys = ["chunks", "content"];
+                        for (const listKey of listKeys) {
+                            if (Array.isArray(payload[listKey])) {
+                                const parts = payload[listKey].map((item: any) => {
+                                    if (typeof item === 'string') return item;
+                                    if (typeof item === 'object') {
+                                        if (item.content && typeof item.content === 'string') return item.content;
+                                        if (item.text && typeof item.text === 'string') return item.text;
+                                    }
+                                    return "";
+                                });
+                                text = parts.join("");
+                                if (text) break;
+                            }
+                        }
+                    }
+                    
+                    // 4. Fallback
+                    if (!text) {
+                        const fallbackKeys = ["text", "delta", "payload"];
+                        for (const k of fallbackKeys) {
+                            if (payload[k] && typeof payload[k] === 'string') {
+                                text = payload[k];
+                                break;
+                            }
+                        }
+                    }
                 }
-                
+
                 if (text) chunks.push(text);
             }
             
-            // If no text chunks found, check if there were other events or errors
             if (chunks.length === 0) {
                  console.warn("No content chunks received from upstream.");
+                 // If we have payload but no text, it might be an error message or empty response
             }
 
             const fullText = chunks.join("");
