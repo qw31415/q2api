@@ -3,6 +3,24 @@ import {
   build_content_block_stop, build_ping, build_message_stop, 
   build_tool_use_start, build_tool_use_input_delta 
 } from "./sse_builder.ts";
+import { get_encoding } from "tiktoken";
+
+// Initialize tokenizer (cl100k_base is used by gpt-4, gpt-3.5-turbo)
+let ENCODING: any = null;
+try {
+  ENCODING = get_encoding("cl100k_base");
+} catch (e) {
+  console.error("Failed to load tiktoken encoding:", e);
+}
+
+function countTokens(text: string): number {
+  if (!text || !ENCODING) return 0;
+  try {
+    return ENCODING.encode(text).length;
+  } catch (e) {
+    return 0;
+  }
+}
 
 export class ClaudeStreamHandler {
   model: string;
@@ -109,7 +127,7 @@ export class ClaudeStreamHandler {
       if (this.currentToolUse && toolInput) {
         let fragment = "";
         if (typeof toolInput === "string") fragment = toolInput;
-        else fragment = JSON.stringify(toolInput); 
+        else fragment = JSON.stringify(toolInput);
 
         this.toolInputBuffer.push(fragment);
         yield build_tool_use_input_delta(this.contentBlockIndex, fragment);
@@ -146,7 +164,7 @@ export class ClaudeStreamHandler {
 
     const fullText = this.responseBuffer.join("");
     const fullToolInput = this.allToolInputs.join("");
-    const outputTokens = Math.max(1, Math.floor((fullText.length + fullToolInput.length) / 4));
+    const outputTokens = countTokens(fullText) + countTokens(fullToolInput);
 
     yield build_message_stop(this.inputTokens, outputTokens, "end_turn");
   }

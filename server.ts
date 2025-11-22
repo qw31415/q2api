@@ -467,7 +467,16 @@ if (CONSOLE_ENABLED) {
 // Chat API
 
 app.post("/v1/messages", async (c) => {
-    const req = await c.req.json<ClaudeRequest>();
+    const rawReq = await c.req.json<Partial<ClaudeRequest>>();
+    const req: ClaudeRequest = {
+        model: rawReq.model || "claude-sonnet-4",
+        messages: rawReq.messages || [],
+        max_tokens: rawReq.max_tokens ?? 4096,
+        temperature: rawReq.temperature,
+        tools: rawReq.tools?.map(t => ({ ...t, description: t.description ?? "" })),
+        stream: rawReq.stream ?? false,
+        system: rawReq.system
+    };
     const authHeader = c.req.header("Authorization");
     const bearer = extractBearer(authHeader);
     

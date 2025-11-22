@@ -1,6 +1,6 @@
 export class EventStreamParser {
-  static parseHeaders(headersData: Uint8Array): Record<string, string> {
-    const headers: Record<string, string> = {};
+  static parseHeaders(headersData: Uint8Array): Record<string, any> {
+    const headers: Record<string, any> = {};
     let offset = 0;
     const decoder = new TextDecoder("utf-8");
 
@@ -27,13 +27,16 @@ export class EventStreamParser {
       if (valueType === 7) {
         const value = decoder.decode(headersData.subarray(offset, offset + valueLength));
         headers[name] = value;
+      } else {
+        const value = headersData.subarray(offset, offset + valueLength);
+        headers[name] = value;
       }
       offset += valueLength;
     }
     return headers;
   }
 
-  static parseMessage(data: Uint8Array): { headers: Record<string, string>, payload: any, total_length: number } | null {
+  static parseMessage(data: Uint8Array): { headers: Record<string, any>, payload: any, total_length: number } | null {
     if (data.byteLength < 16) return null;
     
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);

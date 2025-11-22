@@ -5,17 +5,17 @@ export interface ClaudeMessage {
 
 export interface ClaudeTool {
   name: string;
-  description?: string;
+  description: string;  // Default: ""
   input_schema: Record<string, any>;
 }
 
 export interface ClaudeRequest {
   model: string;
   messages: ClaudeMessage[];
-  max_tokens?: number;
+  max_tokens: number;  // Default: 4096
   temperature?: number;
   tools?: ClaudeTool[];
-  stream?: boolean;
+  stream: boolean;  // Default: false
   system?: string | Array<Record<string, any>>;
 }
 
